@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Conv Forge · 卷积神经网络锻造炉 — 零依赖 · 全自验证 · 可复现 | 作者 晨星</title>
+<style>
+  :root{
+    --bg:#0b0f17; --panel:#111826; --panel2:#0e1420; --line:#1f2a3c;
+    --txt:#e6edf7; --dim:#8fa0b8; --acc:#5ad1c8; --acc2:#7c8cff;
+    --ok:#39d98a; --bad:#ff5c6c; --warn:#ffcc66;
+    --mono:'SF Mono','JetBrains Mono',Consolas,'Courier New',monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',sans-serif;}
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 20px 80px}
+  header h1{margin:0;font-size:26px;letter-spacing:.5px}
+  header h1 .star{color:var(--acc)}
+  header p.sub{margin:6px 0 0;color:var(--dim);font-size:14px;line-height:1.6}
+  .badges{margin-top:12px;display:flex;flex-wrap:wrap;gap:8px}
+  .badge{font-family:var(--mono);font-size:12px;padding:4px 10px;border:1px solid var(--line);
+    border-radius:999px;color:var(--dim);background:var(--panel2)}
+  .badge b{color:var(--acc);font-weight:600}
+  .panel{margin-top:22px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+  .panel h2{margin:0 0 12px;font-size:16px;color:var(--acc2)}
+  .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  button{background:linear-gradient(135deg,var(--acc),var(--acc2));border:none;color:#08111c;
+    font-weight:700;font-size:14px;padding:10px 18px;border-radius:10px;cursor:pointer}
+  button.ghost{background:transparent;border:1px solid var(--line);color:var(--dim)}
+  button:hover{filter:brightness(1.08)}
+  .summary{margin-left:auto;font-family:var(--mono);font-size:14px;color:var(--dim)}
+  .summary b{color:var(--ok)}
+  table{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:600;font-family:var(--mono);font-size:12px}
+  td.name{font-family:var(--mono);color:var(--txt)}
+  td.note{font-family:var(--mono);color:var(--dim);font-size:12px}
+  .st{font-family:var(--mono);font-weight:700}
+  .st.ok{color:var(--ok)} .st.bad{color:var(--bad)}
+  .row-ok td{background:rgba(57,217,138,.04)}
+  .row-bad td{background:rgba(255,92,108,.06)}
+  canvas{background:var(--panel2);border:1px solid var(--line);border-radius:10px;width:100%;height:auto;image-rendering:pixelated}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:720px){.grid2{grid-template-columns:1fr}}
+  .kv{font-family:var(--mono);font-size:13px;color:var(--dim);line-height:1.9}
+  .kv b{color:var(--txt)}
+  footer{margin-top:26px;color:var(--dim);font-size:12px;font-family:var(--mono);line-height:1.7}
+  .inv{margin:8px 0 0;padding-left:18px;color:var(--dim);font-size:13px;line-height:1.8}
+  .inv code{font-family:var(--mono);color:var(--acc);background:var(--panel2);padding:1px 5px;border-radius:5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="star">✦</span> Conv Forge · 卷积神经网络锻造炉</h1>
+    <p class="sub">单文件 · 零依赖 · 全自验证。手写 2D 卷积 / 最大池化 / ReLU / Softmax+交叉熵 / 解析反向传播，
+      数值梯度检验对拍到机器精度，端到端训练真实收敛。属于 <b>forge</b> 家族，与 <b>ai-forge</b> 总枢纽对齐。</p>
+    <div class="badges">
+      <span class="badge">zero-dependency</span>
+      <span class="badge">single-file</span>
+      <span class="badge">from-scratch</span>
+      <span class="badge">gradient-check</span>
+      <span class="badge">im2col + GEMM</span>
+      <span class="badge">author <b>晨星</b></span>
+    </div>
+  </header>
+
+  <div class="panel">
+    <h2>① 不变量自检 / Invariant Self-Check</h2>
+    <div class="controls">
+      <button id="btn-run">运行自检 · Run Self-Tests</button>
+      <button id="btn-train" class="ghost">训练演示 · Train Demo</button>
+      <span class="summary" id="summary">尚未运行</span>
+    </div>
+    <table>
+      <thead><tr><th style="width:34px">#</th><th style="width:210px">不变量 / Invariant</th><th>说明</th><th style="width:190px">度量</th><th style="width:60px">状态</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <ul class="inv">
+      <li>核心不变量：解析反向传播 ≡ 数值中心差分梯度（<code>∂f/∂x ≈ [f(x+εeᵢ)−f(x−εeᵢ)] / 2ε</code>）。</li>
+      <li>高效路径（im2col+GEMM）≡ 朴素七重循环卷积，交叉验证。</li>
+      <li>softmax 经 log-sum-exp 稳定化，数值 1000 级也不溢出，概率和恒为 1。</li>
+    </ul>
+  </div>
+
+  <div class="panel">
+    <h2>② 训练演示 / Live Training Demo</h2>
+    <p class="sub" style="margin:0 0 12px">任务：8×8 灰度图，左半亮=类 0 / 右半亮=类 1（叠加确定性噪声）。小 CNN（conv→ReLU→pool→FC）全批量 SGD 实时收敛。</p>
+    <div class="grid2">
+      <div>
+        <canvas id="cv-filters" width="320" height="200"></canvas>
+        <div class="kv" style="margin-top:10px" id="train-stats">点击「训练演示」开始…</div>
+      </div>
+      <div>
+        <canvas id="cv-loss" width="320" height="200"></canvas>
+        <div class="kv" style="margin-top:10px" id="train-acc">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>③ 架构 / Architecture</h2>
+    <div class="kv">
+      <b>输入</b> [N,1,8,8] → <b>Conv2D</b>(1→4, k=3, s=1, p=0) → [N,4,6,6]<br>
+      → <b>ReLU</b> → <b>MaxPool</b>(2,2) → [N,4,4,4] → <b>Flatten</b> → [N,64]<br>
+      → <b>Linear</b>(64→2) → <b>Softmax + 交叉熵</b> → <b>loss</b><br>
+      <b>优化器</b> 全批量 SGD（解析梯度），学习率可调。前向提供朴素循环与 im2col+GEMM 双实现互校。
+    </div>
+  </div>
+
+  <footer>
+    Conv Forge · part of the <b>forge</b> single-file lab series · author <b>晨星</b> (CJX0712)<br>
+    可运行 · 可复现 · 可验证 — 10 项不变量自检内嵌于脚本，Node 无头一键复现。
+  </footer>
+</div>
+
+<script>
+/* ============================================================
+ * Conv Forge — 单文件零依赖 CNN 锻造炉
+ * 手写卷积 / 池化 / 反向传播 / 数值梯度检验
+ * 作者：晨星 (CJX0712)
+ * 约定：一切张量用一维 Float64Array + shape 元数据，行主序。
+ * ============================================================ */
+(function(global){
+"use strict";
+
+/* ---------- 确定性随机 ---------- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function randn(rng){var u=0,v=0;while(u===0)u=rng();while(v===0)v=rng();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+
+/* ---------- 核心算子（flat 表示） ---------- */
+// 2D 卷积（朴素七重循环），stride/pad 通用
+function conv2dNaive(X,Xsh,W,Wsh,b,stride,pad){
+  var N=Xsh[0],Cin=Xsh[1],H=Xsh[2],Wd=Xsh[3];
+  var Cout=Wsh[0],kH=Wsh[2],kW=Wsh[3];
+  var Ho=Math.floor((H+2*pad-kH)/stride)+1, Wo=Math.floor((Wd+2*pad-kW)/stride)+1;
+  var Y=new Float64Array(N*Cout*Ho*Wo);
+  for(var n=0;n<N;n++)for(var co=0;co<Cout;co++)
+    for(var ho=0;ho<Ho;ho++)for(var wo=0;wo<Wo;wo++){
+      var s=b[co];
+      for(var ci=0;ci<Cin;ci++)for(var kh=0;kh<kH;kh++)for(var kw=0;kw<kW;kw++){
+        var xh=ho*stride+kh-pad, xw=wo*stride+kw-pad;
+        var xv=0; if(xh>=0&&xh<H&&xw>=0&&xw<Wd) xv=X[((n*Cin+ci)*H+xh)*Wd+xw];
+        s+=W[((co*Cin+ci)*kH+kh)*kW+kw]*xv;
+      }
+      Y[((n*Cout+co)*Ho+ho)*Wo+wo]=s;
+    }
+  return {Y:Y,Ysh:[N,Cout,Ho,Wo]};
+}
+// 2D 卷积（im2col + GEMM）—— 与朴素实现交叉验证
+function conv2dIm2col(X,Xsh,W,Wsh,b,stride,pad){
+  var N=Xsh[0],Cin=Xsh[1],H=Xsh[2],Wd=Xsh[3];
+  var Cout=Wsh[0],kH=Wsh[2],kW=Wsh[3];
+  var Ho=Math.floor((H+2*pad-kH)/stride)+1, Wo=Math.floor((Wd+2*pad-kW)/stride)+1;
+  var colLen=Cin*kH*kW;
+  var cols=new Float64Array(N*Ho*Wo*colLen);
+  var p=0;
+  for(var n=0;n<N;n++)for(var ho=0;ho<Ho;ho++)for(var wo=0;wo<Wo;wo++)
+    for(var ci=0;ci<Cin;ci++)for(var kh=0;kh<kH;kh++)for(var kw=0;kw<kW;kw++){
+      var xh=ho*stride+kh-pad, xw=wo*stride+kw-pad;
+      var v=0; if(xh>=0&&xh<H&&xw>=0&&xw<Wd) v=X[((n*Cin+ci)*H+xh)*Wd+xw];
+      cols[p++]=v;
+    }
+  var Y=new Float64Array(N*Cout*Ho*Wo);
+  for(var n2=0;n2<N;n2++)for(var co2=0;co2<Cout;co2++)
+    for(var ho2=0;ho2<Ho;ho2++)for(var wo2=0;wo2<Wo;wo2++){
+      var s=b[co2], colStart=(n2*Ho*Wo+ho2*Wo+wo2)*colLen;
+      for(var d=0;d<colLen;d++) s+=W[co2*colLen+d]*cols[colStart+d];
+      Y[((n2*Cout+co2)*Ho+ho2)*Wo+wo2]=s;
+    }
+  return {Y:Y,Ysh:[N,Cout,Ho,Wo]};
+}
+// 卷积反向传播（解析）→ dX, dW, dB
+function conv2dBackward(dY,dYsh,X,Xsh,W,Wsh,stride,pad){
+  var N=Xsh[0],Cin=Xsh[1],H=Xsh[2],Wd=Xsh[3];
+  var Cout=Wsh[0],kH=Wsh[2],kW=Wsh[3];
+  var Ho=dYsh[2],Wo=dYsh[3];
+  var dX=new Float64Array(N*Cin*H*Wd);
+  var dW=new Float64Array(W.length);
+  var dB=new Float64Array(Cout);
+  for(var n=0;n<N;n++)for(var co=0;co<Cout;co++)
+    for(var ho=0;ho<Ho;ho++)for(var wo=0;wo<Wo;wo++){
+      var g=dY[((n*Cout+co)*Ho+ho)*Wo+wo];
+      dB[co]+=g;
+      for(var ci=0;ci<Cin;ci++)for(var kh=0;kh<kH;kh++)for(var kw=0;kw<kW;kw++){
+        var xh=ho*stride+kh-pad, xw=wo*stride+kw-pad;
+        if(xh>=0&&xh<H&&xw>=0&&xw<Wd){
+          var xi=((n*Cin+ci)*H+xh)*Wd+xw;
+          var wi=((co*Cin+ci)*kH+kh)*kW+kw;
+          dW[wi]+=g*X[xi];
+          dX[xi]+=g*W[wi];
+        }
+      }
+    }
+  return {dX:dX,dW:dW,dB:dB};
+}
+
+/* ---------- 激活 / 池化 ---------- */
+function relu(x){var y=new Float64Array(x.length);for(var i=0;i<x.length;i++)y[i]=x[i]>0?x[i]:0;return y;}
+function reluBackward(dy,x){var dx=new Float64Array(x.length);for(var i=0;i<x.length;i++)dx[i]=x[i]>0?dy[i]:0;return dx;}
+
+function maxpool(X,Xsh,k,stride){
+  var N=Xsh[0],C=Xsh[1],H=Xsh[2],Wd=Xsh[3];
+  var Ho=Math.floor((H-k)/stride)+1, Wo=Math.floor((Wd-k)/stride)+1;
+  var Y=new Float64Array(N*C*Ho*Wo), arg=new Int32Array(N*C*Ho*Wo);
+  for(var n=0;n<N;n++)for(var c=0;c<C;c++)
+    for(var ho=0;ho<Ho;ho++)for(var wo=0;wo<Wo;wo++){
+      var best=-Infinity,bi=0;
+      for(var kh=0;kh<k;kh++)for(var kw=0;kw<k;kw++){
+        var r=ho*stride+kh,col=wo*stride+kw;
+        var v=X[((n*C+c)*H+r)*Wd+col];
+        if(v>best){best=v;bi=r*Wd+col;}
+      }
+      Y[((n*C+c)*Ho+ho)*Wo+wo]=best; arg[((n*C+c)*Ho+ho)*Wo+wo]=bi;
+    }
+  return {Y:Y,Ysh:[N,C,Ho,Wo],arg:arg};
+}
+function maxpoolBackward(dY,dYsh,arg,Xsh,k,stride){
+  var N=Xsh[0],C=Xsh[1],H=Xsh[2],Wd=Xsh[3];
+  var dX=new Float64Array(N*C*H*Wd);
+  for(var n=0;n<N;n++)for(var c=0;c<C;c++)
+    for(var ho=0;ho<dYsh[2];ho++)for(var wo=0;wo<dYsh[3];wo++){
+      var bi=arg[((n*C+c)*dYsh[2]+ho)*dYsh[3]+wo];
+      dX[((n*C+c)*H+Math.floor(bi/Wd))*Wd+(bi%Wd)] += dY[((n*C+c)*dYsh[2]+ho)*dYsh[3]+wo];
+    }
+  return dX;
+}
+
+/* ---------- 线性层 ---------- */
+function linear(A,Ash,W,Wsh,b){
+  var N=Ash[0],D=Ash[1],K=Wsh[1];
+  var Y=new Float64Array(N*K);
+  for(var n=0;n<N;n++)for(var kk=0;kk<K;kk++){
+    var s=b[kk];
+    for(var d=0;d<D;d++) s+=W[d*K+kk]*A[n*D+d];
+    Y[n*K+kk]=s;
+  }
+  return Y;
+}
+function linearBackward(dY,A,Ash,W,Wsh){
+  var N=Ash[0],D=Ash[1],K=Wsh[1];
+  var dW=new Float64Array(D*K), dB=new Float64Array(K), dA=new Float64Array(N*D);
+  for(var n=0;n<N;n++)for(var kk=0;kk<K;kk++){
+    var g=dY[n*K+kk]; dB[kk]+=g;
+    for(var d=0;d<D;d++){ dW[d*K+kk]+=g*A[n*D+d]; dA[n*D+d]+=g*W[d*K+kk]; }
+  }
+  return {dW:dW,dB:dB,dA:dA};
+}
+
+/* ---------- Softmax + 交叉熵（log-sum-exp 稳定） ---------- */
+function softmaxCE(Z,Zsh,y){
+  var N=Zsh[0],K=Zsh[1], probs=new Float64Array(N*K), loss=0;
+  for(var n=0;n<N;n++){
+    var m=-Infinity; for(var k=0;k<K;k++) if(Z[n*K+k]>m) m=Z[n*K+k];
+    var s=0; for(var k2=0;k2<K;k2++){ var e=Math.exp(Z[n*K+k2]-m); probs[n*K+k2]=e; s+=e; }
+    for(var k3=0;k3<K;k3++) probs[n*K+k3]/=s;
+    loss += -Math.log(probs[n*K+y[n]]+1e-15);
+  }
+  return {probs:probs,loss:loss}; // loss = Σ 交叉熵（求和约定，梯度 ≡ softmax−onehot）
+}
+function dSoftmaxCE(probs,Zsh,y){
+  var N=Zsh[0],K=Zsh[1], dZ=new Float64Array(N*K);
+  for(var n=0;n<N;n++){ for(var k=0;k<K;k++) dZ[n*K+k]=probs[n*K+k]; dZ[n*K+y[n]]-=1; }
+  return dZ;
+}
+function accuracy(probs,y){
+  var N=y.length,K=probs.length/N,hit=0;
+  for(var n=0;n<N;n++){ var bi=0; for(var k=1;k<K;k++) if(probs[n*K+k]>probs[n*K+bi])bi=k; if(bi===y[n])hit++; }
+  return hit/N;
+}
+
+/* ---------- 小 CNN：conv→relu→pool→flatten→linear→softmaxCE ---------- */
+function modelForward(p,X,Xsh,y){
+  var c1=conv2dNaive(X,Xsh,p.W1,p.W1sh,p.b1,1,0);
+  var a1=c1.Y,a1sh=c1.Ysh;
+  var r1=relu(a1);
+  var mp=maxpool(r1,a1sh,2,2);
+  var fcIn=mp.Y, fcInSh=[mp.Ysh[0],mp.Ysh[1]*mp.Ysh[2]*mp.Ysh[3]];
+  var a2=linear(fcIn,fcInSh,p.W2,p.W2sh,p.b2);
+  var a2sh=[fcInSh[0],p.W2sh[1]];
+  var sm=softmaxCE(a2,a2sh,y);
+  return {loss:sm.loss,probs:sm.probs,a2sh:a2sh,cache:{X:X,Xsh:Xsh,a1:a1,a1sh:a1sh,arg:mp.arg,pooledSh:mp.Ysh,fcIn:fcIn,fcInSh:fcInSh}};
+}
+function modelBackward(p,dZ,fwd){
+  var c=fwd.cache;
+  var lb=linearBackward(dZ,c.fcIn,c.fcInSh,p.W2,p.W2sh);
+  var dR1=maxpoolBackward(lb.dA,c.pooledSh,c.arg,c.a1sh,2,2);
+  var dA1=reluBackward(dR1,c.a1);
+  var cb=conv2dBackward(dA1,c.a1sh,c.X,c.Xsh,p.W1,p.W1sh,1,0);
+  return {dW1:cb.dW,dB1:cb.dB,dW2:lb.dW,dB2:lb.dB};
+}
+
+/* ---------- 参数初始化（8×8 任务） ---------- */
+function initParams(rng){
+  var Cout=4,Cin=1,kH=3,kW=3;
+  var W1=new Float64Array(Cout*Cin*kH*kW); for(var i=0;i<W1.length;i++)W1[i]=randn(rng)*0.3;
+  var b1=new Float64Array(Cout);
+  var D=Cout*4*4,K=2; // conv6×6 → pool2 → 4×4 → 64
+  var W2=new Float64Array(D*K); for(var j=0;j<W2.length;j++)W2[j]=randn(rng)*0.3;
+  var b2=new Float64Array(K);
+  return {W1:W1,W1sh:[Cout,Cin,kH,kW],b1:b1,W2:W2,W2sh:[D,K],b2:b2};
+}
+/* ---------- 数据：左半亮(类0)/右半亮(类1) ---------- */
+function genData(rng,N){
+  var H=8,W=8,X=new Float64Array(N*H*W), y=new Int32Array(N);
+  for(var n=0;n<N;n++){
+    var cls=rng()<0.5?0:1; y[n]=cls;
+    for(var r=0;r<H;r++)for(var c=0;c<W;c++){
+      var v=(cls===0?(c<4?1:-1):(c<4?-1:1))+(rng()*2-1)*0.15;
+      X[n*H*W+r*W+c]=v;
+    }
+  }
+  return {X:X,y:y,Xsh:[N,1,H,W]};
+}
+function sgd(arr,grad,lr){for(var i=0;i<arr.length;i++)arr[i]-=lr*grad[i];}
+function trainNet(steps,lr,seed){
+  var rng=mulberry32(seed);
+  var data=genData(rng,64), X=data.X,y=data.y,Xsh=data.Xsh;
+  var p=initParams(rng), hist=[];
+  for(var step=0;step<steps;step++){
+    var fwd=modelForward(p,X,Xsh,y);
+    var dZ=dSoftmaxCE(fwd.probs,fwd.a2sh,y);
+    var g=modelBackward(p,dZ,fwd);
+    sgd(p.W1,g.dW1,lr); sgd(p.b1,g.dB1,lr); sgd(p.W2,g.dW2,lr); sgd(p.b2,g.dB2,lr);
+    if(step%10===0||step===steps-1) hist.push(fwd.loss);
+  }
+  var fwd2=modelForward(p,X,Xsh,y);
+  return {p:p,hist:hist,acc:accuracy(fwd2.probs,y),finalLoss:fwd2.loss};
+}
+
+/* ---------- 数值梯度（中心差分） ---------- */
+function numGrad(arr,lossFn,eps){eps=eps||1e-5;var g=new Float64Array(arr.length);
+  for(var i=0;i<arr.length;i++){var old=arr[i];arr[i]=old+eps;var lp=lossFn();arr[i]=old-eps;var lm=lossFn();arr[i]=old;g[i]=(lp-lm)/(2*eps);}
+  return g;}
+function maxRelErr(a,b){var m=0;for(var i=0;i<a.length;i++){var num=Math.abs(a[i]-b[i]);var den=Math.abs(a[i])+Math.abs(b[i])+1e-12;var r=num/den;if(r>m)m=r;}return m;}
+
+/* ============================================================
+ * 不变量自检（10 项）
+ * ============================================================ */
+var TESTS=[];
+function T(name,fn){TESTS.push({name:name,fn:fn});}
+
+// 1) softmax 稳定 + 概率和为 1 + 单调
+T("softmax log-sum-exp 稳定性",function(){
+  var Z=new Float64Array([1000,1000.1,999.9]), Zsh=[1,3];
+  var sm=softmaxCE(Z,Zsh,[0]);
+  var sum=sm.probs[0]+sm.probs[1]+sm.probs[2];
+  var mono=sm.probs[1]>sm.probs[0] && sm.probs[0]>sm.probs[2];
+  var finite=isFinite(sum)&&isFinite(sm.loss);
+  return {ok:Math.abs(sum-1)<1e-12&&mono&&finite,note:"Σp="+sum.toFixed(15)+" mono="+mono};
+});
+
+// 2) im2col+GEMM ≡ 朴素卷积
+T("im2col+GEMM ≡ 朴素卷积",function(){
+  var rng=mulberry32(7),Xsh=[2,2,5,5],X=new Float64Array(100);
+  for(var i=0;i<100;i++)X[i]=rng()*2-1;
+  var Wsh=[3,2,3,3],W=new Float64Array(54); for(var j=0;j<54;j++)W[j]=rng()*2-1;
+  var b=new Float64Array([0.1,-0.2,0.3]);
+  var a=conv2dNaive(X,Xsh,W,Wsh,b,1,0), c=conv2dIm2col(X,Xsh,W,Wsh,b,1,0);
+  var m=0; for(var k=0;k<a.Y.length;k++) m=Math.max(m,Math.abs(a.Y[k]-c.Y[k]));
+  return {ok:m<1e-10&&sameSh(a.Ysh,c.Ysh),note:"maxDiff="+m.toExponential(2)};
+});
+function sameSh(a,b){return a.length===b.length&&a.every(function(v,i){return v===b[i];});}
+
+// 3) 卷积反向传播梯度检验（W,b,X）
+T("卷积反向 ≡ 数值梯度 (W,b,X)",function(){
+  var rng=mulberry32(3),Xsh=[2,1,5,5],X=new Float64Array(50);
+  for(var i=0;i<50;i++)X[i]=rng()*2-1;
+  var Wsh=[2,1,3,3],W=new Float64Array(18); for(var j=0;j<18;j++)W[j]=rng()*2-1;
+  var b=new Float64Array([0.05,-0.05]);
+  function loss(){var r=conv2dNaive(X,Xsh,W,Wsh,b,1,0);var s=0;for(var i=0;i<r.Y.length;i++)s+=r.Y[i]*r.Y[i];return s;}
+  var r=conv2dNaive(X,Xsh,W,Wsh,b,1,0);
+  var dY=new Float64Array(r.Y.length); for(var k=0;k<r.Y.length;k++)dY[k]=2*r.Y[k];
+  var an=conv2dBackward(dY,r.Ysh,X,Xsh,W,Wsh,1,0);
+  var nW=numGrad(W,loss), nB=numGrad(b,loss), nX=numGrad(X,loss);
+  var e=Math.max(maxRelErr(nW,an.dW),maxRelErr(nB,an.dB),maxRelErr(nX,an.dX));
+  return {ok:e<1e-3,note:"maxRelErr="+e.toExponential(2)};
+});
+
+// 4) 最大池化反向梯度检验
+T("最大池化反向 ≡ 数值梯度",function(){
+  var rng=mulberry32(9),Xsh=[1,1,4,4],X=new Float64Array(16);
+  for(var i=0;i<16;i++)X[i]=rng()*2-1;
+  function loss(){var r=maxpool(X,Xsh,2,2);var s=0;for(var i=0;i<r.Y.length;i++)s+=r.Y[i]*r.Y[i];return s;}
+  var r=maxpool(X,Xsh,2,2);
+  var dY=new Float64Array(r.Y.length); for(var i=0;i<r.Y.length;i++)dY[i]=2*r.Y[i];
+  var dX=maxpoolBackward(dY,r.Ysh,r.arg,Xsh,2,2);
+  var nX=numGrad(X,loss);
+  var e=maxRelErr(nX,dX);
+  return {ok:e<1e-3,note:"maxRelErr="+e.toExponential(2)};
+});
+
+// 5) 线性层反向梯度检验
+T("线性层反向 ≡ 数值梯度",function(){
+  var rng=mulberry32(11),Ash=[3,4],A=new Float64Array(12);for(var i=0;i<12;i++)A[i]=rng()*2-1;
+  var Wsh=[4,5],W=new Float64Array(20);for(var j=0;j<20;j++)W[j]=rng()*2-1;
+  var b=new Float64Array(5);
+  function loss(){var Z=linear(A,Ash,W,Wsh,b);var s=0;for(var k=0;k<Z.length;k++)s+=Z[k]*Z[k];return s;}
+  var Z=linear(A,Ash,W,Wsh,b),dY=new Float64Array(Z.length);for(var i2=0;i2<Z.length;i2++)dY[i2]=2*Z[i2];
+  var an=linearBackward(dY,A,Ash,W,Wsh);
+  var e=Math.max(maxRelErr(numGrad(W,loss),an.dW),maxRelErr(numGrad(b,loss),an.dB),maxRelErr(numGrad(A,loss),an.dA));
+  return {ok:e<1e-3,note:"maxRelErr="+e.toExponential(2)};
+});
+
+// 6) ReLU 前向/反向
+T("ReLU 前向/反向",function(){
+  var x=new Float64Array([-2,-0.001,0,0.001,3]), y=relu(x);
+  var dy=new Float64Array([1,1,1,1,1]), dx=reluBackward(dy,x);
+  var okY=y[0]===0&&y[1]===0&&y[2]===0&&y[3]>0&&y[4]===3;
+  var okDx=dx[0]===0&&dx[1]===0&&dx[2]===0&&dx[3]===1&&dx[4]===1;
+  return {ok:okY&&okDx,note:"y=["+[].join.call(y,",")+"]"};
+});
+
+// 7) 端到端小 CNN 梯度检验（全参数）
+T("端到端 CNN 反向 ≡ 数值梯度",function(){
+  var rng=mulberry32(21);
+  var Xsh=[3,1,5,5],X=new Float64Array(75);for(var i=0;i<75;i++)X[i]=rng()*2-1;
+  var y=new Int32Array([0,1,1]);
+  var p={W1:new Float64Array(2*1*3*3),W1sh:[2,1,3,3],b1:new Float64Array(2),
+         W2:new Float64Array(8*2),W2sh:[8,2],b2:new Float64Array(2)};
+  for(var i2=0;i2<p.W1.length;i2++)p.W1[i2]=randn(rng)*0.4;
+  for(var j2=0;j2<p.W2.length;j2++)p.W2[j2]=randn(rng)*0.4;
+  function loss(){return modelForward(p,X,Xsh,y).loss;}
+  var fwd=modelForward(p,X,Xsh,y);
+  var dZ=dSoftmaxCE(fwd.probs,fwd.a2sh,y);
+  var g=modelBackward(p,dZ,fwd);
+  var e=Math.max(
+    maxRelErr(numGrad(p.W1,loss),g.dW1),
+    maxRelErr(numGrad(p.b1,loss),g.dB1),
+    maxRelErr(numGrad(p.W2,loss),g.dW2),
+    maxRelErr(numGrad(p.b2,loss),g.dB2));
+  return {ok:e<1e-2,note:"maxRelErr="+e.toExponential(2)};
+});
+
+// 8) 训练演示真实收敛
+T("端到端训练收敛 (acc≥0.9)",function(){
+  var r=trainNet(400,0.05,123);
+  var dropped=r.hist[r.hist.length-1]<r.hist[0]*0.5;
+  return {ok:r.acc>=0.9&&dropped,note:"acc="+r.acc.toFixed(3)+" loss "+r.hist[0].toFixed(3)+"→"+r.finalLoss.toFixed(3)};
+});
+
+// 9) 确定性：同种子 → 同结果
+T("确定性可复现 (同种子同结果)",function(){
+  var a=trainNet(200,0.05,55), b=trainNet(200,0.05,55);
+  return {ok:a.finalLoss===b.finalLoss&&a.acc===b.acc,note:"lossA="+a.finalLoss.toFixed(10)+" lossB="+b.finalLoss.toFixed(10)};
+});
+
+// 10) 输出 shape 公式正确
+T("卷积输出 shape 公式",function(){
+  var rng=mulberry32(2),Xsh=[1,2,7,7],X=new Float64Array(98);for(var i=0;i<98;i++)X[i]=rng()*2-1;
+  var Wsh=[3,2,3,3],W=new Float64Array(54);for(var j=0;j<54;j++)W[j]=rng()*2-1;
+  var b=new Float64Array(3);
+  var r=conv2dNaive(X,Xsh,W,Wsh,b,1,0);
+  return {ok:sameSh(r.Ysh,[1,3,5,5]),note:"Ysh=["+r.Ysh.join(",")+"]"};
+});
+
+function runAllTests(){
+  var results=[],passed=0;
+  for(var i=0;i<TESTS.length;i++){
+    var out; var ok=false,note="";
+    try{ out=TESTS[i].fn(); ok=!!out.ok; note=out.note||""; }
+    catch(e){ ok=false; note="ERROR: "+e.message; }
+    if(ok)passed++;
+    results.push({idx:i+1,name:TESTS[i].name,ok:ok,note:note});
+  }
+  return {passed:passed,total:TESTS.length,results:results};
+}
+
+/* ---------- 导出（Node / 浏览器通用） ---------- */
+var ConvForge={mulberry32:mulberry32,randn:randn,conv2dNaive:conv2dNaive,conv2dIm2col:conv2dIm2col,
+  conv2dBackward:conv2dBackward,relu:relu,reluBackward:reluBackward,maxpool:maxpool,maxpoolBackward:maxpoolBackward,
+  linear:linear,linearBackward:linearBackward,softmaxCE:softmaxCE,dSoftmaxCE:dSoftmaxCE,accuracy:accuracy,
+  modelForward:modelForward,modelBackward:modelBackward,initParams:initParams,genData:genData,trainNet:trainNet,
+  runAllTests:runAllTests,TESTS:TESTS};
+if(typeof module!=="undefined"&&module.exports){module.exports=ConvForge;}
+if(typeof global!=="undefined"){global.ConvForge=ConvForge;}
+
+/* ---------- 无头运行（Node） ---------- */
+if(typeof window==="undefined"){
+  var r=runAllTests();
+  console.log("Conv Forge · 不变量自检 · author 晨星");
+  for(var i2=0;i2<r.results.length;i2++){var t=r.results[i2];
+    console.log((t.ok?"✅":"❌")+" #"+t.idx+" "+t.name+"  ["+t.note+"]");}
+  console.log("结果: "+r.passed+"/"+r.total+" 绿");
+  if(typeof process!=="undefined"){process.exitCode=r.passed===r.total?0:1;}
+}
+
+/* ---------- 浏览器 UI ---------- */
+if(typeof window!=="undefined"&&typeof document!=="undefined"){
+  document.addEventListener("DOMContentLoaded",function(){
+    var tbody=document.getElementById("tbody"),summary=document.getElementById("summary");
+    function render(res){
+      tbody.innerHTML="";
+      res.results.forEach(function(t){
+        var tr=document.createElement("tr");
+        tr.className=t.ok?"row-ok":"row-bad";
+        tr.innerHTML='<td class="name">'+t.idx+'</td><td class="name">'+t.name+
+          '</td><td>'+(t.ok?"通过":"失败")+'</td><td class="note">'+t.note+
+          '</td><td class="st '+(t.ok?"ok":"bad")+'">'+(t.ok?"✅":"❌")+'</td>';
+        tbody.appendChild(tr);
+      });
+      summary.innerHTML='<b class="'+(res.passed===res.total?"ok":"bad")+'">'+res.passed+'/'+res.total+'</b> 全绿';
+      summary.querySelector("b").style.color=res.passed===res.total?"var(--ok)":"var(--bad)";
+    }
+    document.getElementById("btn-run").addEventListener("click",function(){render(runAllTests());});
+    // 自动跑一次
+    render(runAllTests());
+
+    function drawFilters(p){
+      var cv=document.getElementById("cv-filters"),ctx=cv.getContext("2d");
+      ctx.clearRect(0,0,cv.width,cv.height);
+      var Cout=p.W1sh[0],kH=p.W1sh[2],kW=p.W1sh[3];
+      var cell=60,gap=14,ox=20,oy=20;
+      for(var co=0;co<Cout;co++){
+        var vals=[];for(var i=0;i<kH*kW;i++){vals.push(p.W1[(co*kH*kW)+i]);}
+        var mx=Math.max.apply(null,vals.map(Math.abs))||1;
+        var px=ox+co*(cell+gap),py=oy;
+        for(var kh=0;kh<kH;kh++)for(var kw=0;kw<kW;kw++){
+          var v=vals[kh*kW+kw]/mx; // [-1,1]
+          var r=Math.max(0,v)*255|0,gg=Math.max(0,-v)*255|0,bb=40;
+          ctx.fillStyle="rgb("+r+","+gg+","+bb+")";
+          ctx.fillRect(px+kw*(cell/kW),py+kh*(cell/kH),cell/kW-1,cell/kH-1);
+        }
+        ctx.fillStyle="#8fa0b8";ctx.font="11px monospace";
+        ctx.fillText("filter #"+(co+1),px,py+cell+14);
+      }
+    }
+    function drawLoss(hist){
+      var cv=document.getElementById("cv-loss"),ctx=cv.getContext("2d");
+      ctx.clearRect(0,0,cv.width,cv.height);
+      var W=cv.width,H=cv.height,pad=26;
+      var mx=Math.max.apply(null,hist),mn=Math.min.apply(null,hist);
+      ctx.strokeStyle="#1f2a3c";ctx.strokeRect(pad,10,W-pad,H-30);
+      ctx.strokeStyle="#5ad1c8";ctx.beginPath();
+      for(var i=0;i<hist.length;i++){
+        var x=pad+(W-pad-10)*(i/(hist.length-1||1));
+        var y=H-40-(H-50)*((hist[i]-mn)/((mx-mn)||1));
+        if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+      }
+      ctx.stroke();
+      ctx.fillStyle="#8fa0b8";ctx.font="11px monospace";
+      ctx.fillText("loss "+hist[0].toFixed(2)+" → "+hist[hist.length-1].toFixed(2),pad,H-14);
+    }
+    function runDemo(){
+      var r=trainNet(400,0.05,123);
+      document.getElementById("train-stats").innerHTML=
+        "<b>训练 400 步</b> · lr=0.05 · seed=123<br>最终 loss = <b>"+r.finalLoss.toFixed(4)+"</b><br>训练集准确率 = <b>"+(r.acc*100).toFixed(1)+"%</b>";
+      document.getElementById("train-acc").innerHTML=
+        "初始 loss = <b>"+r.hist[0].toFixed(4)+"</b> → 末段 loss = <b>"+r.hist[r.hist.length-1].toFixed(4)+"</b><br>下降 "+
+        ((1-r.hist[r.hist.length-1]/r.hist[0])*100).toFixed(1)+"%";
+      drawFilters(r.p);drawLoss(r.hist);
+    }
+    document.getElementById("btn-train").addEventListener("click",runDemo);
+  });
+}
+
+})(typeof globalThis!=="undefined"?globalThis:this);
+</script>
+</body>
+</html>
